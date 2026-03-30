@@ -47,8 +47,23 @@
 
 **b. Design changes**
 
-- Did your design change during implementation?
-- If yes, describe at least one change and why you made it.
+Yes, the design evolved during implementation to address missing relationships and potential logic bottlenecks:
+
+1. **Connected Owner to Pet** – Added `pet` parameter to `Owner.__init__()` so the owner holds a reference to their pet. This ensures context is preserved throughout the scheduling process.
+
+2. **Moved task list to Pet** – Added `tasks` list to `Pet` with `add_task()` and `get_tasks()` methods. This models real-world pet care: each pet has specific tasks, not the owner in isolation.
+
+3. **Connected DailyPlan to Owner and Pet** – Changed `DailyPlan.__init__()` to require both `owner` and `pet` parameters. This eliminates context loss when generating schedules—the plan always knows whose tasks it's scheduling.
+
+4. **Simplified generate_schedule() method** – Changed from `generate_schedule(available_time, task_list)` to `generate_schedule()` with no parameters. The method now reads `owner.daily_time_available` and `pet.tasks` directly, reducing coupling and making the method easier to call and test.
+
+5. **Added Task validation** – Added `VALID_PRIORITIES` and `VALID_CATEGORIES` class constants and validation in `Task.__init__()` to catch invalid inputs early (e.g., priority outside 1-3 range, duration ≤ 0).
+
+**Why these changes:**
+
+- The initial design had Owner and Pet as isolated objects with no way to reference each other or their tasks. This would create friction when building the schedule.
+- By connecting the objects, `DailyPlan.generate_schedule()` can build meaningful reasoning ("Owner Jordan has 120 minutes; Mochi needs...") instead of working with abstract parameters.
+- Task validation prevents silent bugs from bad data propagating through the scheduler.
 
 ---
 
