@@ -131,16 +131,92 @@ if pets:
         st.markdown(f"**Tasks for {selected_pet.name}:**")
         task_data = []
         for task in tasks:
+            priority_icon = "🔴 Critical" if task.priority == 1 else "🟡 Standard" if task.priority == 2 else "🟢 Bonus"
+            status_icon = "✅ Pending" if task.completion_status == "pending" else "⏭️ Skipped" if task.completion_status == "skipped" else "✓ Completed"
+            
             task_data.append({
                 "Task": task.name,
-                "Duration (min)": task.duration,
-                "Priority": f"Level {task.priority}",
+                "Duration": f"{task.duration} min",
+                "Priority": priority_icon,
                 "Category": task.category,
-                "Status": task.completion_status
+                "Status": status_icon
             })
-        st.dataframe(task_data, use_container_width=True)
+        st.table(task_data)
     else:
         st.info(f"No tasks yet for {selected_pet.name}. Add one above!")
+    
+    st.divider()
+    
+    # ============================================================================
+    # Advanced Tasks Viewer (Using Scheduler Methods)
+    # ============================================================================
+    st.subheader("🔍 View & Sort Tasks")
+    
+    view_tab1, view_tab2 = st.tabs(["All Tasks by Priority", "Tasks by Pet"])
+    
+    with view_tab1:
+        st.markdown("**All tasks sorted by Priority (Highest → Lowest) then Duration (Shortest → Longest)**")
+        if st.session_state.owner.get_all_tasks():
+            # Use Scheduler method to sort by priority
+            scheduler_preview = Scheduler(st.session_state.owner)
+            priority_sorted = scheduler_preview.get_all_tasks_by_priority()
+            
+            view_data = []
+            for task in priority_sorted:
+                pet_owner = next((p.name for p in pets if task in p.get_tasks()), "Unknown")
+                priority_icon = "🔴" if task.priority == 1 else "🟡" if task.priority == 2 else "🟢"
+                category_icon = {
+                    "Feeding": "🍽️",
+                    "Exercise": "🏃",
+                    "Grooming": "✂️",
+                    "Medical": "💊",
+                    "Enrichment": "🎾",
+                    "Other": "📋"
+                }.get(task.category, "📋")
+                
+                view_data.append({
+                    "Priority": f"{priority_icon} Level {task.priority}",
+                    "Task": task.name,
+                    "Pet": pet_owner,
+                    "Duration": f"{task.duration} min",
+                    "Category": f"{category_icon} {task.category}",
+                    "Status": "✅ Pending" if task.completion_status == "pending" else "⏭️ Skipped" if task.completion_status == "skipped" else "✓ Completed"
+                })
+            st.table(view_data)
+            
+            # Summary statistics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Tasks", len(scheduler_preview.owner.get_all_tasks()))
+            with col2:
+                total_time = sum(t.duration for t in scheduler_preview.owner.get_all_tasks())
+                st.metric("Total Time Needed", f"{total_time} min")
+            with col3:
+                pending_tasks = len(scheduler_preview.owner.get_all_pending_tasks())
+                st.metric("Pending Tasks", pending_tasks)
+        else:
+            st.info("No tasks yet. Add tasks to view them here.")
+    
+    with view_tab2:
+        st.markdown("**View tasks grouped by each pet**")
+        for pet in pets:
+            pet_tasks = pet.get_tasks()
+            if pet_tasks:
+                st.markdown(f"##### {pet.name} 🐾")
+                pet_view_data = []
+                for task in pet_tasks:
+                    priority_icon = "🔴" if task.priority == 1 else "🟡" if task.priority == 2 else "🟢"
+                    pet_view_data.append({
+                        "Priority": f"{priority_icon} Level {task.priority}",
+                        "Task": task.name,
+                        "Duration": f"{task.duration} min",
+                        "Category": task.category,
+                        "Status": "✅ Pending" if task.completion_status == "pending" else "⏭️ Skipped" if task.completion_status == "skipped" else "✓ Completed"
+                    })
+                st.table(pet_view_data)
+            else:
+                st.markdown(f"##### {pet.name} 🐾")
+                st.info(f"No tasks for {pet.name} yet.")
     
     st.divider()
     
@@ -155,36 +231,151 @@ if pets:
         scheduler.generate_schedule()
         summary = scheduler.get_schedule_summary()
         
-        # Display schedule results
-        st.markdown("### Daily Schedule")
-        st.markdown(summary['reasoning'])
-        
-        if summary['scheduled_tasks']:
-            st.markdown("#### ✅ Scheduled Tasks")
-            scheduled_data = []
-            for task in summary['scheduled_tasks']:
-                scheduled_data.append({
-                    "Task": task.name,
-                    "Pet": next((p.name for p in pets if task in p.get_tasks()), "Unknown"),
-                    "Duration (min)": task.duration,
-                    "Priority": f"Level {task.priority}",
-                    "Category": task.category
+        # ====== AUTOMATED CONFLICT DETECTION & WARNINGS ======
+        conflicts = scheduler.detect_conflicts()
+        if conflicts:
+            st.warning("⚠️ **TIME CONFLICTS DETECTED!**")
+            conflict_details = []
+            for task1, task2, reason in conflicts:
+                pet1 = next((p.name for p in pets if task1 in p.get_tasks()), "Unknown")
+                pet2 = next((p.name for p in pets if task2 in p.get_tasks()), "Unknown")
+                is_same_pet = pet1 == pet2
+                
+                conflict_type = "🔴 **CRITICAL**" if is_same_pet else "🟡 **WARNING**"
+                conflict_details.append({
+                    "Type": conflict_type,
+                    "Reason": reason,
+                    "Task 1": f"{task1.name} ({pet1}) @ {task1.scheduled_time}",
+                    "Task 2": f"{task2.name} ({pet2}) @ {task2.scheduled_time}"
                 })
-            st.dataframe(scheduled_data, use_container_width=True)
+            
+            st.table(conflict_details)
+            st.info(
+                "💡 **Tip:** Reschedule conflicting tasks to different times, or consider which tasks "
+                "are truly necessary for this pet today."
+            )
+        else:
+            st.success("✅ No time conflicts detected!")
         
+        st.divider()
+        
+        # ====== DISPLAY SCHEDULED TASKS (sorted by priority & time) ======
+        if summary['scheduled_tasks']:
+            st.markdown("### ✅ **Scheduled Tasks** (Prioritized Schedule)")
+            
+            # Sort by priority then by duration for optimal display
+            sorted_scheduled = scheduler.get_all_tasks_by_priority()
+            sorted_scheduled = [t for t in sorted_scheduled if t in summary['scheduled_tasks']]
+            
+            scheduled_data = []
+            for task in sorted_scheduled:
+                pet_owner = next((p.name for p in pets if task in p.get_tasks()), "Unknown")
+                priority_emoji = "🔴" if task.priority == 1 else "🟡" if task.priority == 2 else "🟢"
+                category_emoji = {
+                    "Feeding": "🍽️",
+                    "Exercise": "🏃",
+                    "Grooming": "✂️",
+                    "Medical": "💊",
+                    "Enrichment": "🎾",
+                    "Other": "📋"
+                }.get(task.category, "📋")
+                
+                scheduled_data.append({
+                    "Priority": f"{priority_emoji} Level {task.priority}",
+                    "Task": task.name,
+                    "Pet": pet_owner,
+                    "Duration": f"{task.duration} min",
+                    "Category": f"{category_emoji} {task.category}",
+                    "Time": task.scheduled_time or "Flexible"
+                })
+            
+            st.table(scheduled_data)
+            st.success(
+                f"🎉 **Great news!** {len(summary['scheduled_tasks'])} task(s) fit into the schedule. "
+                f"Total time: **{summary['time_used']} minutes**"
+            )
+        else:
+            st.info("No tasks scheduled yet. Add tasks to get started!")
+        
+        # ====== DISPLAY SKIPPED TASKS ======
         if summary['skipped_tasks']:
-            st.markdown("#### ⏭️ Skipped Tasks (insufficient time)")
+            st.divider()
+            st.markdown("### ⏭️ **Skipped Tasks** (Insufficient Time)")
+            
             skipped_data = []
             for task in summary['skipped_tasks']:
+                pet_owner = next((p.name for p in pets if task in p.get_tasks()), "Unknown")
+                priority_emoji = "🔴" if task.priority == 1 else "🟡" if task.priority == 2 else "🟢"
+                category_emoji = {
+                    "Feeding": "🍽️",
+                    "Exercise": "🏃",
+                    "Grooming": "✂️",
+                    "Medical": "💊",
+                    "Enrichment": "🎾",
+                    "Other": "📋"
+                }.get(task.category, "📋")
+                
                 skipped_data.append({
+                    "Priority": f"{priority_emoji} Level {task.priority}",
                     "Task": task.name,
-                    "Pet": next((p.name for p in pets if task in p.get_tasks()), "Unknown"),
-                    "Duration (min)": task.duration,
-                    "Priority": f"Level {task.priority}",
-                    "Category": task.category
+                    "Pet": pet_owner,
+                    "Duration": f"{task.duration} min",
+                    "Category": f"{category_emoji} {task.category}",
+                    "Reason": "Not enough time today"
                 })
-            st.dataframe(skipped_data, use_container_width=True)
+            
+            st.table(skipped_data)
+            st.warning(
+                f"⏰ **Not enough time** for {len(summary['skipped_tasks'])} task(s). "
+                f"Consider increasing available time or prioritizing critical tasks."
+            )
         
-        st.markdown(f"### Time Summary")
-        st.metric("Time Used", f"{summary['time_used']} min", f"of {summary['time_available']} available")
+        # ====== TIME SUMMARY & STATISTICS ======
+        st.divider()
+        st.markdown("### 📊 **Schedule Summary**")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric(
+                "Total Scheduled",
+                len(summary['scheduled_tasks']),
+                f"{len(summary['scheduled_tasks'])} tasks"
+            )
+        with col2:
+            st.metric(
+                "Time Used",
+                f"{summary['time_used']}m",
+                f"of {summary['time_available']} available"
+            )
+        with col3:
+            remaining = summary['time_available'] - summary['time_used']
+            st.metric(
+                "Time Remaining",
+                f"{remaining}m",
+                "Spare time ✨" if remaining > 0 else "Over time ⚠️"
+            )
+        with col4:
+            utilization = round((summary['time_used'] / summary['time_available']) * 100, 1)
+            st.metric(
+                "Utilization",
+                f"{utilization}%",
+                delta=None
+            )
+        
+        # Time breakdown by priority
+        st.markdown("#### Time Breakdown by Priority Level")
+        priority_time = {1: 0, 2: 0, 3: 0}
+        for task in summary['scheduled_tasks']:
+            priority_time[task.priority] += task.duration
+        
+        breakdown_data = [
+            {"Priority Level": "1 - Essential/Medical 🔴", "Time (min)": priority_time[1]},
+            {"Priority Level": "2 - Standard Care 🟡", "Time (min)": priority_time[2]},
+            {"Priority Level": "3 - Bonus/Enrichment 🟢", "Time (min)": priority_time[3]},
+        ]
+        st.table(breakdown_data)
+        
+        st.markdown("---")
+        st.markdown("**📋 Detailed Reasoning:**")
+        st.info(summary['reasoning'])
 
